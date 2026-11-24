@@ -1,8 +1,6 @@
 # LinkedIn AI Autoposter
 
 > A project for automatically publishing posts to my LinkedIn profile. All the code is vibecoded (Claude Code), with my technical review and approval =) In the end it turned into a tool I use every day, and I might keep updating it in the future.
->
-> — Ihor
 
 **What it is:** a bot that reads media buying and affiliate marketing news from Telegram channels, writes a post in my voice in three languages, sends the draft to my Telegram for one-tap approval, and publishes it to LinkedIn at a random time every day.
 
