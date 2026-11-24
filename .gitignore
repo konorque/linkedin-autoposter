@@ -1,0 +1,18 @@
+# Secrets
+.env
+.dev.vars
+*.key
+*.pem
+
+# Tooling
+node_modules/
+.wrangler/
+
+# Raw n8n exports — sanitize before committing
+exports/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

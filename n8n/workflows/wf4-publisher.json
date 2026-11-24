@@ -1,0 +1,343 @@
+{
+  "name": "WF4 — Публикация в LinkedIn",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Будни 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 225) }}",
+        "unit": "minutes"
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Случайная пауза 0–224 мин",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        0
+      ],
+      "webhookId": "a1000000-0000-4000-8000-0000000000aa"
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Тест вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000001",
+              "name": "person_id",
+              "value": "YOUR_LINKEDIN_PERSON_ID",
+              "type": "string"
+            },
+            {
+              "id": "c1000000-0000-4000-8000-000000000002",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "approved"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Взять approved посты",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        660,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берём самый ранний approved-пост (по id): так соблюдается порядок UA -> RU -> EN\nconst rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r.id !== undefined && r.status === 'approved');\n\nif (!rows.length) return []; // очередь пуста — ничего не публикуем\n\nrows.sort((a, b) => a.id - b.id);\nreturn [{ json: rows[0] }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Выбрать следующий",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "person": "={{ $('Config').first().json.person_id }}",
+        "text": "={{ $json.text }}",
+        "shareMediaCategory": "NONE",
+        "additionalFields": {
+          "visibility": "PUBLIC"
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Опубликовать в LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $('Выбрать следующий').first().json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "published",
+            "linkedin_post_id": "={{ $json.urn ?? $json.id ?? '' }}",
+            "published_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linkedin_post_id",
+              "displayName": "linkedin_post_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Отметить published",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.telegram_chat_id }}",
+        "text": "=✅ Опубликовано в LinkedIn ({{ $('Выбрать следующий').first().json.lang }}):\n\n{{ $('Выбрать следующий').first().json.text.slice(0, 200) }}…",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Telegram: успех",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.telegram_chat_id }}",
+        "text": "=❌ Ошибка публикации в LinkedIn:\n{{ $json.error?.message || JSON.stringify($json.error || $json) }}\n\nЕсли ошибка 401 / Unauthorized — переподключи credential «LinkedIn account» в n8n (токен живёт 60 дней).",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "name": "Telegram: ошибка",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Будни 10:00": {
+      "main": [
+        [
+          {
+            "node": "Случайная пауза 0–224 мин",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Случайная пауза 0–224 мин": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тест вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Взять approved посты",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Взять approved посты": {
+      "main": [
+        [
+          {
+            "node": "Выбрать следующий",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Выбрать следующий": {
+      "main": [
+        [
+          {
+            "node": "Опубликовать в LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Опубликовать в LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Отметить published",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: ошибка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отметить published": {
+      "main": [
+        [
+          {
+            "node": "Telegram: успех",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Kyiv"
+  },
+  "pinData": {}
+}

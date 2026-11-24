@@ -1,0 +1,10 @@
+{
+  "name": "linkedin-autoposter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "logs": "wrangler tail",
+    "test": "node --test test/lib.test.js"
+  }
+}

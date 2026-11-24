@@ -1,0 +1,384 @@
+{
+  "name": "WF2 — Черновики постов",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "918850f3-38d9-4b32-8230-b06ac6f543d4",
+      "name": "Будни 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f638b9a5-aaa4-41ca-97f9-df8202c13021",
+      "name": "Тест вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "74d1868f-7f8c-4c8b-a603-53c582491670",
+      "name": "При регенерации",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "45e75dae-2cb7-4192-9f8d-08c9a5bebf60",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "1d17ed84-a12c-4193-a7d5-032f125cbea6",
+              "name": "bot_token",
+              "value": "YOUR_TELEGRAM_BOT_TOKEN",
+              "type": "string"
+            },
+            {
+              "id": "c07f7e9d-ffcd-4887-8b27-f20cc6d63204",
+              "name": "channels",
+              "value": "adgambling, yellowwebchat, cpa_lenta, thepartnerkin, uaff_media",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bab69fa2-c521-496c-90f5-97494b387448",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "returnAll": true
+      },
+      "id": "d574417e-5b45-4fe1-84af-623e861e131c",
+      "name": "Все строки Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        460,
+        200
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Решаем, нужна ли новая тема, и готовим список каналов\nconst rows = $input.all().map(i => i.json).filter(r => r.id !== undefined);\nconst approved = rows.filter(r => r.status === 'approved').length;\nconst freshDrafts = rows.filter(r =>\n  r.status === 'draft' && Date.now() - new Date(r.createdAt).getTime() < 20 * 3600e3\n).length;\n\n// Ручной тест и кнопка «Другая тема» запускают генерацию всегда\nconst forced = $('Тест вручную').isExecuted || $('При регенерации').isExecuted;\nif (!forced && (approved >= 3 || freshDrafts > 0)) return []; // очередь полная или ждём апрув\n\nconst used_urls = rows.map(r => r.source_url).filter(Boolean);\nconst channels = String($('Config').first().json.channels)\n  .split(',')\n  .map(s => s.trim().replace(/^https?:\\/\\/t\\.me\\//, '').replace(/^@/, ''))\n  .filter(Boolean);\n\nreturn channels.map(channel => ({ json: { channel, used_urls } }));"
+      },
+      "id": "6826041d-2f42-4a21-83a2-6e39330fae95",
+      "name": "Проверка очереди",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://t.me/s/{{ $json.channel }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "a6cd7f27-374f-48f7-8d95-dc895425957e",
+      "name": "Скачать канал",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Разбираем веб-превью публичных каналов t.me/s/<канал>\nconst used = new Set($('Проверка очереди').first().json.used_urls || []);\nconst MAX_AGE = 48 * 3600e3;\n\nconst decode = s => s\n  .replace(/<br\\s*\\/?>/gi, '\\n')\n  .replace(/<[^>]+>/g, '')\n  .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\")\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n  .trim();\n\nconst posts = [];\nfor (const item of $input.all()) {\n  const html = item.json.data || '';\n  const blocks = String(html).split('tgme_widget_message_wrap').slice(1);\n  for (const b of blocks) {\n    const post = (b.match(/data-post=\"([^\"]+)\"/) || [])[1];\n    const body = (b.match(/tgme_widget_message_text[^>]*>([\\s\\S]*?)<\\/div>/) || [])[1];\n    const dt = (b.match(/<time[^>]*datetime=\"([^\"]+)\"/) || [])[1];\n    if (!post || !body || !dt) continue;\n    const url = 'https://t.me/' + post;\n    if (used.has(url)) continue;\n    if (Date.now() - new Date(dt).getTime() > MAX_AGE) continue;\n    const text = decode(body);\n    if (text.length < 120) continue; // отсекаем короткий мусор\n    posts.push({ url, date: dt, text: text.slice(0, 1200) });\n  }\n}\n\nposts.sort((a, b) => new Date(b.date) - new Date(a.date));\nconst top = posts.slice(0, 30);\nif (!top.length) return []; // нет свежих постов — ничего не генерируем\n\nconst digest = top.map((p, i) => `[${i + 1}] ${p.url}\\n${p.text}`).join('\\n\\n---\\n\\n');\nreturn [{ json: { digest, count: top.length } }];"
+      },
+      "id": "bb0a82c0-f7ef-44bd-a6d0-14376136f0cc",
+      "name": "Разбор постов каналов",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Формат этого поста: {{ ['опыт', 'опыт', 'мнение'][Math.floor(Math.random() * 3)] }}.\n\nНиже — свежие посты из отраслевых Telegram-каналов за последние 48 часов. Каждый начинается с [номер] и ссылкой.\n\nВыбери ОДНУ тему — самую интересную и полезную для аудитории LinkedIn (медиабаеры, affiliate- и performance-маркетологи). Приоритет: изменения рекламных платформ, тренды рынка, кейсы с выводами. Избегай рекламы, вакансий, розыгрышей и мемов без смысла.\n\nНапиши по теме пост в трёх версиях: украинская (uk), русская (ru), английская (en). Не дословный перевод: каждая версия должна звучать естественно для носителя языка.\n\nОтветь ТОЛЬКО валидным JSON без markdown, строго в формате:\n{\"topic\": \"тема кратко на русском\", \"source_url\": \"ссылка выбранного поста\", \"uk\": \"текст\", \"ru\": \"текст\", \"en\": \"текст\"}\n\nПосты:\n{{ $json.digest }}",
+        "hasOutputParser": false,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Ты пишешь LinkedIn-посты от лица Игоря — практикующего медиабаера (Facebook/Meta, арбитраж трафика, affiliate). Пиши так, будто Игорь сам набрал пост с телефона между запусками.\n\nРеальные тексты Игоря:\n1. «ФБ снова штормит друзья😵‍💫 Цукер беснуется»\n2. «Любому сильному баеру хочется сфокусироваться на анализе и оптимизации креатива/воронки/оффера, а не на механических действиях по типу запусков, фарма аккаунтов и тд.»\n3. «Друзья, как ваш день? Начало недели было тяжелым по запускам, но вроде потихоньку отпускает, как ваша ситуация?»\n\nФОРМАТЫ ПОСТА. Формат задаётся в сообщении пользователя. Если не задан — выбери сам по теме.\n\nФормат «опыт» — Игорь делится тем, что увидел у себя:\n1. Короткий заход: что произошло («ФБ выкатил фичу», «Гугл опять поменял…», «ТикТок режет…») + эмодзи.\n2. Суть простыми словами.\n3. Личное впечатление: «тестанул на своих офферах», «глянул у себя в кабинетах», «по моим заливам».\n4. Короткий ироничный прогноз или вывод.\n\nПример формата «опыт»:\n«ФБ выкатил новую фичу 👀\n\nТеперь в одно объявление можно закинуть до 5 уже опубликованных постов, а алгоритм сам решает, кому что показать 🎯\n\nТестанул на своих офферах и заливах. По идее удобно, меньше мусора на фанке, но статы по каждому посту отдельно нет, так что непонятно, что именно зашло 🤷‍♂️\n\nПока выглядит как новая игрушка, из-за которой словим очередные штормы кабинетов и БМов 🌪️\n\n#MediaBuying #FacebookAds #AffiliateMarketing»\n\nФормат «мнение» — Игорь рассуждает о новости или тренде, НЕ утверждая, что сам что-то тестировал:\n1. Короткий заход: тезис или реакция.\n2. Суть новости/тренда.\n3. Его взгляд: почему это важно для баеров, к чему приведёт, что бы он делал («я бы…», «по-моему…», «тут вижу два варианта…»).\n4. Короткий вывод.\n\nПример формата «мнение»:\n«Чем дальше, тем больше баинг превращается в работу с данными, а не с кнопками 🧠\n\nАвтоправила, Advantage+, автозаливы — платформы сами забирают механику, которую раньше делали руками.\n\nПо-моему, через год-два ценность баера будет не в том, сколько кабинетов он откручивает, а в том, насколько быстро он находит рабочий оффер и крео и понимает, почему они зашли 🎯\n\nКто это поймёт раньше, тот и заберёт рынок.\n\n#MediaBuying #PerformanceMarketing»\n\nОБЩИЕ ПРАВИЛА:\n- 300–700 символов без учёта хэштегов. Между блоками — пустая строка.\n- Обычная капитализация: первая строка и каждое новое предложение (после точки, «!», «?» и в начале блока) — с ЗАГЛАВНОЙ буквы. Названия, бренды и аббревиатуры пиши правильно: GTA VI, CPM, CTR, ROI, CPA, Meta, TikTok, Google, Apple, iOS, Цукер, БМ, ФБ.\n- Не пиши длинные предложения без знаков препинания: если в предложении больше 15–20 слов, разбей его или поставь запятые.\n- Читатель не знает контекста. Всегда называй вертикаль, о которой речь (гемблинг/гембла, беттинг, нутра, дейтинг, крипта, e-commerce и тд), и прямо объясняй связи между фактами. Плохо: «аудитория та же самая парни до 35». Хорошо: «у гемблы и GTA VI одна аудитория — парни до 35, так что мы с геймдевом бьёмся за одних и тех же людей».\n- Сленг баеров: ФБ, Цукер, крео, залив, связка, кабинет, БМ, фанка, шторм, бан, и тд.\n- Эмодзи: 3–4 на пост, по смыслу. Ставь ТОЛЬКО в конце блока (перед пустой строкой), никогда в середине мысли и не перед следующим предложением того же блока. Один эмодзи на блок. Подходящие: 👀 🎯 📉 📈 🤷‍♂️ 🌪️ 😵‍💫 🔥 💸 🧠 ⚠️ 🛠️ 😅 🫠.\n- НЕ задавай вопросов аудитории в конце. Пост заканчивается выводом и хэштегами.\n- Хэштеги: 2–3 штуки в самом конце отдельной строкой, на английском, каждое слово с заглавной буквы. Выбирай по теме из: #MediaBuying #AffiliateMarketing #FacebookAds #MetaAds #PerformanceMarketing #TikTokAds #GoogleAds #DigitalMarketing #iGaming. Одинаковые для всех трёх языковых версий.\n- Не выдумывай цифры (ROI, спенд, проценты) и факты, которых нет в источнике.\n- Не упоминай Telegram-каналы и не ставь ссылки.\n- Не давай инструкций по обходу модерации, клоакингу и фарму аккаунтов.\n\nЗапрещённые фразы и приёмы: «интересное обновление», «упростить жизнь», «магия алгоритма», «ложка дёгтя», «как обычно», «в современном мире», «давайте разберёмся», «стоит отметить», «игра меняется», «game changer», «круто», вопросы в конце поста, схема «плюсы / минусы / вывод».\n\nДля английской версии сохраняй тот же тон и сленг на английском (FB, Zuck, creatives, ad accounts, BMs, launches), с обычной капитализацией, с теми же правилами эмодзи и хэштегов. Украинская версия — живой украинский, а не калька с русского."
+            }
+          ]
+        }
+      },
+      "id": "557b5643-811d-45a0-8cb0-daae25c09dfa",
+      "name": "Генерация поста",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-4-hydrogen",
+        "options": {
+          "temperature": 0.8,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "366f97d5-0ffd-47e0-ad9b-cf4119a6ebed",
+      "name": "Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Достаём JSON из ответа нейросети и готовим 3 строки для таблицы Posts\nlet raw = String($input.first().json.text || '');\nraw = raw.replace(/```json|```/g, '').trim();\nconst start = raw.indexOf('{');\nconst end = raw.lastIndexOf('}');\nif (start < 0 || end < 0) throw new Error('Нейросеть не вернула JSON: ' + raw.slice(0, 300));\nconst data = JSON.parse(raw.slice(start, end + 1));\n\nconst langs = ['uk', 'ru', 'en'];\nfor (const l of langs) {\n  if (!data[l]) throw new Error('В ответе нет версии ' + l);\n}\n\nconst topic_id = 't' + Date.now().toString(36);\nreturn langs.map((lang, i) => ({\n  json: {\n    topic_id,\n    lang,\n    seq: i + 1,\n    text: String(data[lang]).trim().slice(0, 2900), // лимит поста LinkedIn — 3000 символов\n    status: 'draft',\n    source_url: data.source_url || '',\n  },\n}));"
+      },
+      "id": "49ebbdfa-a284-475f-9760-988673ad9b35",
+      "name": "Разбор ответа ИИ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "312bffd7-295c-4b12-a667-9a73a0ba10c6",
+      "name": "Сохранить черновики",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Отправляем черновик в Telegram: 3 сообщения, кнопки на последнем\nconst cfg = $('Config').first().json;\nconst rows = $('Разбор ответа ИИ').all().map(i => i.json);\nconst tid = rows[0].topic_id;\nconst flag = { uk: '🇺🇦 UA', ru: '🇷🇺 RU', en: '🇬🇧 EN' };\n\nconst send = body => this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api.telegram.org/bot${cfg.bot_token}/sendMessage`,\n  json: true,\n  body: { chat_id: cfg.telegram_chat_id, disable_web_page_preview: true, ...body },\n});\n\nawait send({ text: `📝 Новый черновик ${tid}\\nИсточник: ${rows[0].source_url || '—'}` });\nfor (let i = 0; i < rows.length; i++) {\n  const r = rows[i];\n  const body = { text: `${flag[r.lang]}\\n\\n${r.text}`.slice(0, 4000) };\n  if (i === rows.length - 1) {\n    body.reply_markup = {\n      inline_keyboard: [[\n        { text: '✅ Опубликовать', callback_data: `approve:${tid}` },\n        { text: '🔄 Другая тема', callback_data: `regen:${tid}` },\n        { text: '❌ Пропустить', callback_data: `skip:${tid}` },\n      ]],\n    };\n  }\n  await send(body);\n}\nreturn [{ json: { sent: true, topic_id: tid } }];"
+      },
+      "id": "ce29dcb0-3911-42f7-a3d3-7aaea675be11",
+      "name": "Отправить в Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        200
+      ],
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Будни 09:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тест вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "При регенерации": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Все строки Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Все строки Posts": {
+      "main": [
+        [
+          {
+            "node": "Проверка очереди",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка очереди": {
+      "main": [
+        [
+          {
+            "node": "Скачать канал",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Скачать канал": {
+      "main": [
+        [
+          {
+            "node": "Разбор постов каналов",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Разбор постов каналов": {
+      "main": [
+        [
+          {
+            "node": "Генерация поста",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Генерация поста": {
+      "main": [
+        [
+          {
+            "node": "Разбор ответа ИИ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Разбор ответа ИИ": {
+      "main": [
+        [
+          {
+            "node": "Сохранить черновики",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохранить черновики": {
+      "main": [
+        [
+          {
+            "node": "Отправить в Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Генерация поста",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Kyiv"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,237 @@
+{
+  "name": "WF3 — Кнопки апрува",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "e9f11286-6e11-4617-bae8-59d115ceee9d",
+      "name": "Каждую минуту",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "0069ff15-742f-4c72-b207-fe454e771767",
+      "name": "Тест вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dfc13f13-a4a5-42f6-a6b0-9af6a425601e",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "5c9b78de-d8d7-4cda-a7ac-e76d3f9f8c92",
+              "name": "bot_token",
+              "value": "YOUR_TELEGRAM_BOT_TOKEN",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1e09ec61-bf7d-4cd4-ae50-f6b21900b1ab",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Забираем нажатия кнопок у Telegram (getUpdates), отвечаем на них\nconst cfg = $('Config').first().json;\nconst chatId = String(cfg.telegram_chat_id);\nconst api = (method, body) => this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api.telegram.org/bot${cfg.bot_token}/${method}`,\n  json: true,\n  body,\n});\n// Ответы Telegram (всплывашка, удаление кнопок, сообщение) не должны ломать обработку\nconst safe = async (method, body) => {\n  try { await api(method, body); } catch (e) { /* старое нажатие или кнопки уже убраны */ }\n};\n\nconst res = await api('getUpdates', { timeout: 0, allowed_updates: ['callback_query'] });\nconst updates = res.result || [];\nif (!updates.length) return [];\n\nconst actions = {\n  approve: ['approved', '✅ Одобрено. Посты встали в очередь.'],\n  skip: ['skipped', '❌ Пропущено.'],\n  regen: ['skipped', '🔄 Генерирую другую тему…'],\n};\n\nconst out = [];\nfor (const u of updates) {\n  const cq = u.callback_query;\n  if (!cq) continue;\n  if (String(cq.from.id) !== chatId) {\n    await safe('answerCallbackQuery', { callback_query_id: cq.id, text: 'Нет доступа' });\n    continue;\n  }\n  const [action, topic_id] = String(cq.data || '').split(':');\n  if (!actions[action] || !topic_id) continue;\n\n  await safe('answerCallbackQuery', { callback_query_id: cq.id, text: actions[action][1] });\n  await safe('editMessageReplyMarkup', {\n    chat_id: cq.message.chat.id,\n    message_id: cq.message.message_id,\n    reply_markup: { inline_keyboard: [] },\n  });\n  await safe('sendMessage', {\n    chat_id: cq.message.chat.id,\n    text: actions[action][1],\n    reply_parameters: { message_id: cq.message.message_id },\n  });\n  out.push({ json: { action, topic_id, new_status: actions[action][0] } });\n}\n\n// Подтверждаем получение только после обработки, чтобы при ошибке нажатия не потерялись\nawait api('getUpdates', { offset: updates[updates.length - 1].update_id + 1, timeout: 0 });\nreturn out;"
+      },
+      "id": "5fad4f6f-b689-4189-b3ef-e562729185e1",
+      "name": "Обработка кнопок",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "topic_id",
+              "keyValue": "={{ $json.topic_id }}"
+            },
+            {
+              "keyName": "status",
+              "keyValue": "draft"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.new_status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "00f6b758-6e31-42bf-aba1-b227e682bd54",
+      "name": "Обновить статус",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        680,
+        100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Запускаем генерацию новой темы, если была нажата «Другая тема»\nconst regen = $('Обработка кнопок').all().some(i => i.json.action === 'regen');\nreturn regen ? [{ json: { regen: true } }] : [];"
+      },
+      "id": "3ec29e69-c59c-4bae-8c3d-e64fb3cdcb70",
+      "name": "Нужна новая тема?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "aa1eab6c-d1eb-47db-98f4-5accf3770b98",
+      "name": "Запустить WF2",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Каждую минуту": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тест вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Обработка кнопок",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обработка кнопок": {
+      "main": [
+        [
+          {
+            "node": "Обновить статус",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обновить статус": {
+      "main": [
+        [
+          {
+            "node": "Нужна новая тема?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нужна новая тема?": {
+      "main": [
+        [
+          {
+            "node": "Запустить WF2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Kyiv"
+  },
+  "pinData": {}
+}

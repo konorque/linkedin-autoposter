@@ -1,0 +1,23 @@
+name = "linkedin-autoposter"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Один cron на всё: каждые 5 минут (UTC). Логика по киевскому времени — в коде.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autoposter"
+database_id = "8bcb595b-2cc5-4bd1-90d5-df84a37a467a"   # выдаст команда: npx wrangler d1 create autoposter
+
+[vars]
+# Адрес воркера (заполнишь после первого деплоя), например https://linkedin-autoposter.<ник>.workers.dev
+PUBLIC_URL = "https://linkedin-autoposter.konor-linkedinautoposter.workers.dev"
+CHANNELS = "adgambling, cpa_lenta, thepartnerkin, uaff_media, fb_killa"
+GEMINI_MODELS = "gemini-4-hydrogen, gemini-3.8-flash"
+OPENROUTER_MODELS = "google/gemma-4-31b-it:free, openrouter/free"
+
+# Секреты НЕ пишем сюда — задаются командой: npx wrangler secret put <ИМЯ>
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET, GEMINI_API_KEY, OPENROUTER_API_KEY,
+# LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, ADMIN_KEY
