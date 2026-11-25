@@ -11,11 +11,13 @@
 ## What it does
 
 - 📰 **Collects news** from public Telegram channels about media buying and affiliate marketing (last 48 hours, already-used sources are skipped).
-- ✍️ **Writes a post** in the author's voice: few-shot prompt with real examples of my texts, two formats (personal experience / opinion), emoji and hashtag rules, a blacklist of "AI-sounding" phrases.
+- ✍️ **Writes a post** in the author's voice: few-shot prompt with real examples of my texts, emoji and hashtag rules, a blacklist of "AI-sounding" phrases.
+- 🎲 **No two posts alike**: 7 post formats (quick reaction, experience, opinion, what it means for buyers, then vs now, irony, advice) and 3 lengths are picked at random (medium length wins most often). The bot also shows the model the openings and endings of the last 5 posts so it doesn't repeat them.
+- 🧾 **Honest by design**: the model is not allowed to claim I tested something or to invent results and numbers that aren't in the source.
 - 🌍 **One topic → three posts**: Ukrainian, Russian and English versions, published on three consecutive days.
 - ✅ **Human in the loop**: every draft arrives in Telegram with *Publish / Another topic / Skip* buttons. Nothing goes out without approval.
 - 🕐 **Human-like timing**: one post a day at a random time between 10:00 and 13:44 (Kyiv). The time is stable for the day and catches up if a run was missed.
-- 🔁 **AI fallback chain**: Gemini 4 Hydrogen → Gemini 3.8 Flash → free models on OpenRouter, with a retry on overload.
+- 🔁 **AI fallback chain**: Gemini 4 Hydrogen → Gemini 3.8 Flash → Gemini 3.6 Flash → free models on OpenRouter (Gemma 4 31B → Nemotron 3 Ultra → `openrouter/free`). Retry on overload, empty answers skip to the next model, and a manual `/generate` retries itself up to 3 times.
 - 🔔 **Notifications**: publication links, errors (rate-limited), and a reminder 7 days before the LinkedIn token expires.
 - 🤖 **Bot commands**: `/status`, `/generate`, `/publish_now`.
 
@@ -28,7 +30,7 @@ flowchart LR
     subgraph Drafts["Drafts · 9:00–14:00 if queue &lt; 3"]
         W --> TG_SRC["t.me/s/&lt;channel&gt;<br/>web preview"]
         TG_SRC --> PARSE["Parse + filter 48h<br/>dedupe sources"]
-        PARSE --> AI["Gemini → Gemini Flash<br/>→ OpenRouter free"]
+        PARSE --> AI["Gemini chain<br/>→ OpenRouter free chain"]
         AI --> DB[("D1 · posts")]
         AI --> BOT["Telegram: draft<br/>+ buttons"]
     end
@@ -63,7 +65,7 @@ flowchart LR
 | Scheduling | Cloudflare Cron Triggers (one `*/5 * * * *` trigger, time logic in code by `Europe/Kyiv`) |
 | Database | Cloudflare D1 (SQLite): `posts` queue + `settings` key-value |
 | Tooling | Wrangler CLI, Node.js built-in test runner (`node --test`) |
-| AI | Google Gemini API (`gemini-4-hydrogen`, `gemini-3.8-flash`, JSON response mode), OpenRouter (`google/gemma-4-31b-it:free`, `openrouter/free` router) |
+| AI | Google Gemini API (`gemini-4-hydrogen`, `gemini-3.8-flash`, `gemini-3.6-flash`, JSON response mode), OpenRouter (`google/gemma-4-31b-it:free`, `nvidia/nemotron-3-ultra-550b-a55b:free`, `openrouter/free`) |
 | Telegram | Bot API: webhook with secret token, inline keyboards, callback queries, bot commands |
 | LinkedIn | OAuth 2.0 + OpenID Connect (`openid profile w_member_social`), Posts API (`/rest/posts`), automatic `LinkedIn-Version` fallback, "little text" escaping and hashtag templates |
 | Sources | Public Telegram channel web previews (`t.me/s/<channel>`) parsed without third-party services |
@@ -88,8 +90,8 @@ flowchart LR
 | Telegram channels have no reading API | Parse the public web preview `https://t.me/s/<channel>` |
 | LinkedIn truncates posts with `( ) @ _ #` | Escape reserved characters and convert hashtags to `{hashtag\|\#\|Tag}` |
 | LinkedIn API versions expire monthly | Try `LinkedIn-Version` from the current month backwards, remember the one that works |
-| Free AI models get overloaded (503/429) | Retry once, then a chain of Gemini models, then OpenRouter's free-model router |
-| AI text sounds like AI | Few-shot prompt with real texts, strict structure, emoji placement rules, banned phrases, random format choice |
+| Free AI models get overloaded (503/429) or return empty answers | Retry once, then a chain of 3 Gemini models and 3 OpenRouter models; reasoning output is excluded so it can't eat the answer; manual generation retries every 5 min up to 3 times |
+| AI text sounds like AI and repeats itself | Few-shot prompt with real texts, 7 weighted formats and 3 lengths picked in code, last 5 openings/endings fed back as "don't repeat", banned phrases and labels ("Summary:", "Conclusion:") |
 | Posting at the same time looks automated | Daily random target time (hash of the date) within a 10:00–13:44 window, with in-run wait and catch-up |
 | Expiring LinkedIn token (60 days, no refresh) | Stored expiry, Telegram reminder 7 days ahead, one-link reconnect via `/linkedin/connect` |
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   kyivNow, publishTargetMinutes, publishDecision, parseTelegramChannel,
   buildDigest, parseAiJson, toLinkedInCommentary, linkedInVersions, pickFormat,
+  pickLength, postEdges, buildUserPrompt,
 } from '../src/lib.js';
 
 test('kyivNow: зимой UTC+2', () => {
@@ -90,7 +91,38 @@ test('linkedInVersions', () => {
   assert.deepEqual(v, ['202602', '202601', '202512', '202511']);
 });
 
-test('pickFormat', () => {
-  assert.equal(pickFormat(0.1), 'опыт');
-  assert.equal(pickFormat(0.9), 'мнение');
+test('pickFormat: все форматы достижимы', () => {
+  const seen = new Set();
+  for (let i = 0; i < 1000; i++) seen.add(pickFormat(i / 1000));
+  assert.equal(seen.size, 7);
+  assert.equal(pickFormat(0), 'короткая реакция');
+  assert.equal(pickFormat(0.9999), 'совет');
+});
+
+test('pickLength: средняя чаще, короткая реакция всегда короткая', () => {
+  const counts = {};
+  for (let i = 0; i < 1000; i++) {
+    const l = pickLength('опыт', i / 1000).name;
+    counts[l] = (counts[l] || 0) + 1;
+  }
+  assert.ok(counts['средний'] > counts['короткий'] && counts['средний'] > counts['длинный']);
+  assert.equal(pickLength('короткая реакция', 0.9).name, 'короткий');
+});
+
+test('postEdges: первая строка и концовка без хэштегов', () => {
+  const e = postEdges('Заход тут 👀\n\nСередина\n\nВывод: концовка 🌪️\n\n#MediaBuying #iGaming');
+  assert.deepEqual(e, { first: 'Заход тут 👀', last: 'Вывод: концовка 🌪️' });
+  assert.equal(postEdges('#OnlyTags'), null);
+});
+
+test('buildUserPrompt: формат, длина и недавние посты', () => {
+  const p = buildUserPrompt('ирония', 'DIGEST', {
+    length: { name: 'длинный', range: '600–900' },
+    recent: [{ first: 'A', last: 'B' }],
+  });
+  assert.match(p, /Формат этого поста: ирония/);
+  assert.match(p, /Длина: длинный, 600–900/);
+  assert.match(p, /Заход: «A» \/ Концовка: «B»/);
+  assert.match(p, /DIGEST$/);
+  assert.doesNotMatch(buildUserPrompt('опыт', 'D'), /Недавние/);
 });

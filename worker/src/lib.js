@@ -131,13 +131,64 @@ export function linkedInVersions(date = new Date(), count = 12) {
   return out;
 }
 
-/** Случайный формат поста: «опыт» в 2/3 случаев, «мнение» в 1/3. */
-export function pickFormat(rand = Math.random()) {
-  return rand < 2 / 3 ? 'опыт' : 'мнение';
+/** Форматы поста и их веса (чем больше вес, тем чаще выпадает). */
+export const FORMATS = [
+  ['короткая реакция', 2],
+  ['опыт', 2],
+  ['мнение', 2],
+  ['что это значит для баера', 2],
+  ['было и стало', 1],
+  ['ирония', 1],
+  ['совет', 1],
+];
+
+/** Длина поста (символов без хэштегов) и веса: средняя выпадает чаще. */
+export const LENGTHS = [
+  ['короткий', '150–300', 1],
+  ['средний', '300–600', 2],
+  ['длинный', '600–900', 1],
+];
+
+function weighted(items, weightOf, rand) {
+  const total = items.reduce((s, x) => s + weightOf(x), 0);
+  let r = rand * total;
+  for (const x of items) {
+    r -= weightOf(x);
+    if (r < 0) return x;
+  }
+  return items[items.length - 1];
 }
 
-export function buildUserPrompt(format, digest) {
+/** Случайный формат с учётом весов. */
+export function pickFormat(rand = Math.random()) {
+  return weighted(FORMATS, (f) => f[1], rand)[0];
+}
+
+/** Случайная длина: средняя в 50% случаев. Короткая реакция всегда короткая. */
+export function pickLength(format, rand = Math.random()) {
+  if (format === 'короткая реакция') return { name: 'короткий', range: '150–300' };
+  const [name, range] = weighted(LENGTHS, (l) => l[2], rand);
+  return { name, range };
+}
+
+/** Первая строка и последняя строка до хэштегов — чтобы модель не повторяла заходы и концовки. */
+export function postEdges(text) {
+  const lines = String(text)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^(#[\p{L}\p{N}]+\s*)+$/u.test(l));
+  if (!lines.length) return null;
+  return { first: lines[0].slice(0, 160), last: lines[lines.length - 1].slice(0, 160) };
+}
+
+export function buildUserPrompt(format, digest, { length = { name: 'средний', range: '300–600' }, recent = [] } = {}) {
+  const recentBlock = recent.length
+    ? `\n\nНедавние посты — НЕ повторяй эти заходы, концовки и их построение:\n${recent
+        .map((r, i) => `${i + 1}. Заход: «${r.first}» / Концовка: «${r.last}»`)
+        .join('\n')}`
+    : '';
   return `Формат этого поста: ${format}.
+Длина: ${length.name}, ${length.range} символов без учёта хэштегов.${recentBlock}
 
 Ниже — свежие посты из отраслевых Telegram-каналов за последние 48 часов. Каждый начинается с [номер] и ссылкой.
 

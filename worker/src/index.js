@@ -12,6 +12,8 @@ import {
   toLinkedInCommentary,
   linkedInVersions,
   pickFormat,
+  pickLength,
+  postEdges,
   buildUserPrompt,
 } from './lib.js';
 
@@ -198,7 +200,13 @@ async function runDrafts(env, { force = false } = {}) {
   }
 
   const format = pickFormat();
-  const { data, model, fallbackReason } = await generatePost(env, buildUserPrompt(format, digest));
+  const length = pickLength(format);
+  // Последние 5 тем (русская версия) — чтобы модель не повторяла заходы и концовки
+  const { results: recentRows } = await env.DB.prepare(
+    "SELECT text FROM posts WHERE lang = 'ru' ORDER BY id DESC LIMIT 5",
+  ).all();
+  const recent = recentRows.map((r) => postEdges(r.text)).filter(Boolean);
+  const { data, model, fallbackReason } = await generatePost(env, buildUserPrompt(format, digest, { length, recent }));
 
   const topicId = 't' + Date.now().toString(36);
   const langs = ['uk', 'ru', 'en'];
@@ -213,7 +221,7 @@ async function runDrafts(env, { force = false } = {}) {
     chat_id: env.TELEGRAM_CHAT_ID,
     disable_web_page_preview: true,
     text:
-      `📝 Новый черновик ${topicId}\nФормат: ${format} · модель: ${model}\nИсточник: ${data.source_url || '—'}` +
+      `📝 Новый черновик ${topicId}\nФормат: ${format} · длина: ${length.name} · модель: ${model}\nИсточник: ${data.source_url || '—'}` +
       (fallbackReason ? `\n(основная модель недоступна, сработал резерв)` : ''),
   });
   for (let i = 0; i < langs.length; i++) {
